@@ -44,9 +44,10 @@ data "aws_iam_policy_document" "lambda_assume_role" {
 }
 
 resource "aws_iam_role" "lambda" {
-  name = "${var.name_prefix}-edge-auth-lambda-role"
-
+  name               = "${var.name_prefix}-edge-auth-lambda-role"
   assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+
+  tags = merge({ Name = "${var.name_prefix}-edge-auth-lambda-role" }, var.tags)
 }
 
 resource "aws_lambda_function" "lambda" {
