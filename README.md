@@ -18,11 +18,16 @@ module "secret_area_auth" {
   source = "github.com/rstudio/edge-auth"
 
   known_users = {
-    jet = "fuel"
+    jet   = "fuel"
     steel = "beams"
   }
 
   name_prefix = "secret-area"
+
+  tags = {
+    "com.example.serious/unit"    = "secrets"
+    "com.example.serious/purpose" = "secrecy"
+  }
 }
 
 resource "aws_cloudfront_distribution" "secret_area" {

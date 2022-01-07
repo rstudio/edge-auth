@@ -6,9 +6,16 @@ variable "name_prefix" {
   type = string
 }
 
+variable "tags" {
+  type = map(string)
+  default = {
+    "github-repo" = "github.com/rstudio/edge-auth"
+  }
+}
+
 data "archive_file" "zip" {
   type        = "zip"
-  output_path = "${path.cwd}/edge_auth.zip"
+  output_path = "${path.cwd}/${var.name_prefix}-edge_auth.zip"
 
   source {
     content  = <<-EDGEAUTHPY
@@ -37,9 +44,10 @@ data "aws_iam_policy_document" "lambda_assume_role" {
 }
 
 resource "aws_iam_role" "lambda" {
-  name = "${var.name_prefix}-edge-auth-lambda-role"
-
+  name               = "${var.name_prefix}-edge-auth-lambda-role"
   assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+
+  tags = merge({ Name = "${var.name_prefix}-edge-auth-lambda-role" }, var.tags)
 }
 
 resource "aws_lambda_function" "lambda" {
@@ -54,6 +62,8 @@ resource "aws_lambda_function" "lambda" {
   lifecycle {
     create_before_destroy = true
   }
+
+  tags = merge({ Name = "${var.name_prefix}-edge-auth-lambda" }, var.tags)
 }
 
 output "lambda_arn" {
