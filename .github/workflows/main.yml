@@ -8,12 +8,15 @@ on:
 jobs:
   main:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.9.x', '3.10.x']
     steps:
       - uses: actions/checkout@v2
       - run: pipx install pipenv
       - uses: actions/setup-python@v2
         with:
-          python-version: '3.9.x'
+          python-version: '${{ matrix.python-version }}'
           cache: pipenv
       - run: make deps
       - run: make test
