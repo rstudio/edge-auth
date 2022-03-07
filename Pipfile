@@ -8,6 +8,3 @@ pytest = "*"
 pytest-cov = "*"
 
 [packages]
-
-[requires]
-python_version = "3.9"
