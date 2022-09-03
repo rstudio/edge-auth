@@ -6,6 +6,10 @@ hello:
 deps:
 	pipenv install --dev
 
+.PHONY: deps-up
+deps-up:
+	pipenv update --dev
+
 .PHONY: test
 test:
 	pipenv run pytest -vv --cov=edge_auth --cov-report=term --cov-report=xml
