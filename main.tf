@@ -15,7 +15,7 @@ variable "tags" {
 
 data "archive_file" "zip" {
   type        = "zip"
-  output_path = "${path.cwd}/${var.name_prefix}-edge_auth.zip"
+  output_path = "${var.name_prefix}-edge_auth.zip"
 
   source {
     content  = <<-EDGEAUTHPY
