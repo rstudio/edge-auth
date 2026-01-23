@@ -4,9 +4,10 @@
 
 **Current State:** Python 3.9.10 (EOL: October 2025)
 **Target Version:** Python 3.12.8 (Support until: October 2028)
-**Timeline:** 2-3 weeks
+**Timeline:** 2 weeks
 **Risk Level:** LOW
-**Deployment Strategy:** Blue/Green with Canary Release
+**Deployment Strategy:** Production Blue/Green with Gradual Traffic Shift
+**Environment:** Production only (no staging)
 
 ### Why Python 3.12?
 
@@ -24,6 +25,24 @@
 - ✅ **Low Risk**: No breaking changes affecting our code
 - ✅ **Faster Migration**: Reduces overall timeline by 1-2 weeks
 - ✅ **Less Maintenance**: Fewer intermediate testing cycles
+
+### No Staging Environment - Extra Precautions
+
+⚠️ **IMPORTANT**: This plan deploys directly to production without a staging environment.
+
+**Additional Risk Mitigation Measures:**
+1. **Green Lambda Testing**: Deploy parallel Lambda for smoke testing
+2. **Extended Monitoring**: 2-week intensive monitoring period
+3. **Off-Hours Deployment**: Schedule during low-traffic window
+4. **Quick Rollback Ready**: < 5 minute reversion capability
+5. **Team On-Call**: Have team available during deployment window
+6. **Gradual Validation**: Monitor extensively before declaring success
+
+**Deployment Window Recommendations:**
+- Choose lowest-traffic period (weeknight, early morning)
+- Ensure team availability for 2-4 hours post-deployment
+- Have rollback command ready to execute
+- Monitor continuously for first 2 hours
 
 ---
 
@@ -63,7 +82,7 @@
 
 ---
 
-## Phase 1: Pre-Upgrade Preparation (Days 1-2)
+## Phase 1: Pre-Upgrade Preparation (Days 1-3)
 
 ### 1.1 Environment Setup
 
@@ -101,7 +120,7 @@ git tag -a python-3.9-baseline -m "Python 3.9 baseline before upgrade"
 
 ---
 
-## Phase 2: Development Environment Upgrade (Days 3-5)
+## Phase 2: Development Environment Upgrade (Days 4-6)
 
 ### 2.1 Update Python Version File
 
@@ -164,7 +183,7 @@ python3.12 -m py_compile test_edge_auth.py
 
 ---
 
-## Phase 3: CI/CD Configuration (Days 5-6)
+## Phase 3: CI/CD Configuration (Days 6-7)
 
 ### 3.1 Update GitHub Actions Workflow
 
@@ -232,150 +251,47 @@ gh run watch
 
 ---
 
-## Phase 4: Staging Deployment (Days 7-10)
+## Phase 4: Blue/Green Production Preparation (Days 8-9)
 
-### 4.1 Update Terraform Configuration
+### 4.1 Create Blue/Green Terraform Configuration
 
-**Option A: Create Staging-Specific Variable**
+Since there's no staging environment, we'll create a parallel Lambda function for safe production testing.
+
+**Update `main.tf` to support blue/green deployment:**
 
 ```hcl
-# Add to main.tf or create staging.tfvars
+# Add variable for runtime version
 variable "python_runtime" {
-  type    = string
-  default = "python3.12"
+  type        = string
+  description = "Python runtime version"
+  default     = "python3.9"
 }
 
+# Original Lambda (Blue - Python 3.9)
 resource "aws_lambda_function" "lambda" {
-  # ... existing config ...
-  runtime = var.python_runtime
-  # ... rest of config ...
-}
-```
-
-**Option B: Direct Update (Recommended for this project)**
-
-Update `main.tf` line 59:
-```hcl
-runtime = "python3.12"
-```
-
-### 4.2 Deploy to Staging Environment
-
-```bash
-# Review changes
-terraform plan
-
-# Expected output:
-# ~ aws_lambda_function.lambda
-#   ~ runtime: "python3.9" -> "python3.12"
-
-# Apply changes to staging
-terraform apply -target=aws_lambda_function.lambda
-
-# Note: This will create a new Lambda version
-```
-
-### 4.3 Staging Validation Tests
-
-**Test 1: Valid Authentication**
-```bash
-# Test with valid credentials
-curl -v -u "jet:fuel" https://staging.example.com/protected/resource
-
-# Expected: 200 OK (or resource response)
-```
-
-**Test 2: Missing Authorization**
-```bash
-# Test without credentials
-curl -v https://staging.example.com/protected/resource
-
-# Expected: 401 with WWW-Authenticate header
-```
-
-**Test 3: Invalid Authorization Format**
-```bash
-# Test with malformed auth
-curl -v -H "Authorization: Basic bmFyZgo=" https://staging.example.com/protected/resource
-
-# Expected: 400 with Edge-Auth-Error header
-```
-
-**Test 4: Unknown User**
-```bash
-# Test with invalid credentials
-curl -v -u "fake:user" https://staging.example.com/protected/resource
-
-# Expected: 404 with Edge-Auth-Error header
-```
-
-### 4.4 Monitor CloudWatch Logs
-
-```bash
-# Get Lambda function name
-FUNCTION_NAME=$(terraform output -raw lambda_arn | cut -d: -f7)
-
-# Tail logs
-aws logs tail /aws/lambda/${FUNCTION_NAME} --follow --since 1h
-
-# Look for:
-# - No Python errors
-# - Successful invocations
-# - Normal response times
-```
-
-### 4.5 Performance Comparison
-
-```bash
-# Monitor Lambda metrics
-aws cloudwatch get-metric-statistics \
-  --namespace AWS/Lambda \
-  --metric-name Duration \
-  --dimensions Name=FunctionName,Value=${FUNCTION_NAME} \
-  --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%S) \
-  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
-  --period 300 \
-  --statistics Average,Maximum
-
-# Compare with Python 3.9 baseline
-# Expected: Similar or better performance
-```
-
-### 4.6 Soak Test
-
-- **Duration**: 48-72 hours
-- **Monitor**: Error rates, latency, invocation count
-- **Success Criteria**:
-  - Zero authentication errors for valid users
-  - Error rate < 0.1%
-  - P95 latency within 10% of baseline
-
----
-
-## Phase 5: Production Deployment (Days 11-15)
-
-### 5.1 Pre-Deployment Checklist
-
-- [ ] All staging tests passed
-- [ ] 48-hour soak test completed successfully
-- [ ] CloudWatch logs show no errors
-- [ ] Performance metrics acceptable
-- [ ] Rollback procedure tested and documented
-- [ ] Team notified of deployment window
-
-### 5.2 Blue/Green Deployment Setup
-
-**Create Production Blue/Green Lambda**
-
-```hcl
-# Temporarily create second Lambda for canary
-resource "aws_lambda_function" "lambda_python312" {
   filename         = data.archive_file.zip.output_path
-  function_name    = "${var.name_prefix}-edge-auth-lambda-py312"
+  function_name    = "${var.name_prefix}-edge-auth-lambda"
   handler          = "edge_auth.handler"
   publish          = true
   role             = aws_iam_role.lambda.arn
-  runtime          = "python3.12"  # New version
+  runtime          = var.python_runtime
+  source_code_hash = data.archive_file.zip.output_base64sha256
+
+  lifecycle {
+    create_before_destroy = true
+  }
+
+  tags = merge({ Name = "${var.name_prefix}-edge-auth-lambda" }, var.tags)
+}
+
+# New Lambda (Green - Python 3.12) - Temporary for testing
+resource "aws_lambda_function" "lambda_green" {
+  filename         = data.archive_file.zip.output_path
+  function_name    = "${var.name_prefix}-edge-auth-lambda-green"
+  handler          = "edge_auth.handler"
+  publish          = true
+  role             = aws_iam_role.lambda.arn
+  runtime          = "python3.12"
   source_code_hash = data.archive_file.zip.output_base64sha256
 
   lifecycle {
@@ -383,41 +299,225 @@ resource "aws_lambda_function" "lambda_python312" {
   }
 
   tags = merge(
-    { Name = "${var.name_prefix}-edge-auth-lambda-py312" },
-    { Purpose = "python312-canary" },
+    { Name = "${var.name_prefix}-edge-auth-lambda-green" },
+    { DeploymentType = "blue-green-testing" },
     var.tags
   )
 }
 
-output "lambda_python312_qualified_arn" {
-  value = aws_lambda_function.lambda_python312.qualified_arn
+output "lambda_green_qualified_arn" {
+  value       = aws_lambda_function.lambda_green.qualified_arn
+  description = "Green Lambda ARN for blue/green deployment"
 }
 ```
 
-### 5.3 Canary Deployment - 10% Traffic
-
-**Option 1: Using CloudFront Function Association Weighted**
-*(Note: Lambda@Edge doesn't support native traffic splitting, use CloudFront distribution cloning or DNS-based approach)*
-
-**Option 2: Time-Based Gradual Rollout (Recommended)**
+### 4.2 Deploy Green Lambda (Python 3.12)
 
 ```bash
-# Day 1: Deploy during low-traffic window
-# Update production Lambda to Python 3.12
+# Review changes
+terraform plan
+
+# Expected: Creates new lambda_green resource
+
+# Apply changes
 terraform apply
 
-# Monitor for 2 hours
-# If issues: terraform apply -var="python_runtime=3.9" (rollback)
+# Verify both Lambdas exist
+aws lambda list-functions --query 'Functions[?contains(FunctionName, `edge-auth`)].{Name:FunctionName,Runtime:Runtime}'
 ```
 
-**Option 3: Create Separate CloudFront Distribution for Canary**
+### 4.3 Manual Smoke Testing (Before Production Traffic)
 
-```hcl
-# Clone CloudFront distribution with Python 3.12 Lambda
-# Route 10% of DNS traffic via weighted routing
+**Test the Green Lambda directly (bypassing CloudFront):**
+
+```bash
+# Get the green Lambda ARN
+GREEN_ARN=$(terraform output -raw lambda_green_qualified_arn)
+
+# Create test event
+cat > test_event_valid.json <<'EOF'
+{
+  "Records": [{
+    "cf": {
+      "request": {
+        "headers": {
+          "authorization": [{
+            "key": "Authorization",
+            "value": "Basic amV0OmZ1ZWw="
+          }]
+        }
+      }
+    }
+  }]
+}
+EOF
+
+# Test 1: Valid credentials (should return request object)
+aws lambda invoke \
+  --function-name ${GREEN_ARN} \
+  --payload file://test_event_valid.json \
+  response.json
+
+cat response.json
+# Expected: Request object returned (authentication passed)
+
+# Test 2: Missing authorization
+cat > test_event_noauth.json <<'EOF'
+{
+  "Records": [{
+    "cf": {
+      "request": {
+        "headers": {}
+      }
+    }
+  }]
+}
+EOF
+
+aws lambda invoke \
+  --function-name ${GREEN_ARN} \
+  --payload file://test_event_noauth.json \
+  response_noauth.json
+
+cat response_noauth.json
+# Expected: 401 status
+
+# Test 3: Invalid authorization format
+cat > test_event_invalid.json <<'EOF'
+{
+  "Records": [{
+    "cf": {
+      "request": {
+        "headers": {
+          "authorization": [{
+            "key": "Authorization",
+            "value": "Basic bmFyZgo="
+          }]
+        }
+      }
+    }
+  }]
+}
+EOF
+
+aws lambda invoke \
+  --function-name ${GREEN_ARN} \
+  --payload file://test_event_invalid.json \
+  response_invalid.json
+
+cat response_invalid.json
+# Expected: 400 status
+
+# Clean up test files
+rm -f test_event_*.json response*.json
 ```
 
-### 5.4 Monitor Production (Critical)
+### 4.4 Verify Python 3.12 Specific Behavior
+
+```bash
+# Check CloudWatch logs for Python version
+GREEN_FUNCTION_NAME=$(terraform output -raw lambda_green_qualified_arn | cut -d: -f7)
+
+aws logs tail /aws/lambda/${GREEN_FUNCTION_NAME} --since 10m
+
+# Look for:
+# - No Python errors
+# - Successful invocations
+# - Normal execution patterns
+```
+
+### 4.5 Pre-Production Checklist
+
+Before proceeding to production traffic shift:
+
+- [ ] Green Lambda deployed successfully
+- [ ] Manual smoke tests passed (all 4 test cases)
+- [ ] CloudWatch logs show no Python errors
+- [ ] Both Blue and Green Lambdas operational
+- [ ] Rollback procedure documented and understood
+- [ ] Monitoring dashboards ready
+- [ ] Team notified of deployment window
+- [ ] Off-hours deployment scheduled (if applicable)
+
+---
+
+## Phase 5: Production Deployment with Traffic Shift (Days 10-14)
+
+### 5.1 Pre-Deployment Checklist
+
+- [ ] Green Lambda tested successfully (Phase 4)
+- [ ] Manual smoke tests passed
+- [ ] CloudWatch logs show no errors
+- [ ] Both Blue and Green Lambdas operational
+- [ ] Rollback procedure ready
+- [ ] Monitoring dashboards open
+- [ ] Team notified of deployment window
+- [ ] Deploy during low-traffic window if possible
+
+### 5.2 Strategy: CloudFront Distribution Update
+
+Since Lambda@Edge doesn't support weighted traffic splitting, we'll use a **time-based gradual rollout** where we switch the CloudFront distribution to point to the Green Lambda and monitor closely.
+
+**Deployment Approach:**
+1. **Hour 0**: Switch CloudFront to Green Lambda (Python 3.12)
+2. **Hour 0-2**: Intensive monitoring (every 5-10 minutes)
+3. **Hour 2-24**: Frequent monitoring (every 30-60 minutes)
+4. **Day 2-7**: Daily monitoring
+5. **Day 7+**: Normal monitoring, declare success
+
+### 5.3 Switch CloudFront to Green Lambda
+
+**Update CloudFront distribution to use Green Lambda:**
+
+```bash
+# Get the Green Lambda ARN
+GREEN_ARN=$(terraform output -raw lambda_green_qualified_arn)
+
+# Option 1: Update CloudFront via AWS Console
+# - Go to CloudFront > Distributions
+# - Select your distribution
+# - Go to Behaviors > Edit
+# - Update Lambda Function Association ARN to Green Lambda
+# - Save and deploy
+
+# Option 2: Update via Terraform (if CloudFront is managed in this repo)
+# Update the aws_cloudfront_distribution resource
+# Change lambda_arn from blue to green
+# Run: terraform apply
+
+# Option 3: Update via AWS CLI
+DISTRIBUTION_ID="YOUR_DISTRIBUTION_ID"
+
+# Get current config
+aws cloudfront get-distribution-config \
+  --id ${DISTRIBUTION_ID} \
+  --query 'DistributionConfig' \
+  > current_config.json
+
+# Edit current_config.json manually to update Lambda ARN
+# Then update distribution (requires ETag handling)
+```
+
+### 5.4 Alternative: Update Blue Lambda In-Place (Lower Risk)
+
+**Recommended approach for single-distribution setups:**
+
+Instead of switching CloudFront between Lambdas, update the Blue Lambda directly with create_before_destroy lifecycle:
+
+```bash
+# Update main.tf variable
+terraform apply -var="python_runtime=python3.12"
+
+# This will:
+# 1. Create new Lambda version with Python 3.12
+# 2. Update CloudFront association
+# 3. Delete old Lambda version
+
+# Rollback if needed:
+terraform apply -var="python_runtime=python3.9"
+```
+
+### 5.5 Monitor Production (Critical - No Staging Safety Net)
 
 ```bash
 # Real-time log monitoring
@@ -435,25 +535,41 @@ aws logs tail /aws/lambda/${FUNCTION_NAME} --follow --filter-pattern "ERROR"
 - Latency threshold: P95 > 150% of baseline
 - Invocation errors: Any increase
 
-### 5.5 Progressive Rollout
+### 5.6 Monitoring Schedule (Extra Vigilance Required)
 
-**Hour 0-2: Initial Deployment**
-- Deploy Python 3.12 Lambda
+Since we're deploying directly to production without staging validation:
+
+**Hour 0-1: CRITICAL WINDOW**
+- Monitor CloudWatch Logs in real-time (keep terminal open)
+- Check metrics every 5 minutes
+- Have rollback command ready to execute
+- Watch for: ANY errors, increased latency, authentication failures
+
+**Hour 1-4: HIGH ALERT**
 - Monitor every 15 minutes
-- Quick rollback if errors detected
+- Review CloudWatch dashboard
+- Check error rates and latency
+- Validate sample requests manually
 
-**Hour 2-24: First Day Monitoring**
-- Monitor every hour
-- Check CloudWatch dashboards
-- Review error logs
-- Validate authentication success rate
+**Hour 4-24: ACTIVE MONITORING**
+- Monitor every 30-60 minutes
+- Review aggregated metrics
+- Compare with baseline (same time yesterday)
+- Spot-check authentication flows
 
-**Day 2-7: Extended Monitoring**
-- Daily monitoring
-- Weekly metric review
-- Compare against Python 3.9 baseline
+**Day 2-7: ELEVATED MONITORING**
+- Monitor 3-4 times daily
+- Daily metric review
+- Compare week-over-week trends
+- Gather feedback from users (if applicable)
 
-### 5.6 Declare Success
+**Day 7-14: NORMAL MONITORING**
+- Daily check-ins
+- Weekly comprehensive review
+- Document any anomalies
+- Prepare success report
+
+### 5.7 Declare Success
 
 **Success Criteria:**
 - ✅ 7 days in production without issues
@@ -472,7 +588,7 @@ echo "Days in Production: 7" >> migration_success.txt
 
 ---
 
-## Phase 6: Cleanup & Documentation (Days 16-17)
+## Phase 6: Cleanup & Documentation (Days 15-16)
 
 ### 6.1 Remove Python 3.9 from CI
 
@@ -496,8 +612,15 @@ strategy:
 ### 6.3 Clean Up Terraform Resources
 
 ```bash
-# Remove any blue/green temporary resources
-# Simplify terraform config back to single Lambda
+# Remove the green Lambda (temporary testing resource)
+# Update main.tf to remove lambda_green resource
+
+# Option 1: Remove green Lambda via Terraform
+# Comment out or delete lambda_green resource in main.tf
+terraform apply
+
+# Option 2: Keep green Lambda for future testing
+# Tag it as "testing" and document its purpose
 ```
 
 ### 6.4 Communicate Success
@@ -530,14 +653,15 @@ strategy:
 
 ### Immediate Rollback (< 5 minutes)
 
-**Scenario 1: During Staging**
+**Scenario 1: During Development/Testing**
 ```bash
-# Revert Terraform changes
+# Revert local changes
 git revert HEAD
-terraform apply
+echo "3.9.10" > .python-version
+pipenv --python 3.9
 ```
 
-**Scenario 2: During Production**
+**Scenario 2: During Production (CRITICAL)**
 ```bash
 # Update Lambda to Python 3.9
 terraform apply -var="python_runtime=python3.9"
@@ -562,23 +686,43 @@ terraform apply -var="python_runtime=python3.9"
 
 ### Rollback Testing
 
+**IMPORTANT:** Without a staging environment, rollback practice is critical.
+
 ```bash
-# Test rollback procedure in staging BEFORE production deployment
-# Day 9: Practice rollback
+# Test rollback procedure with Green Lambda BEFORE production deployment
+# Day 9: Practice rollback with local environment
 
-# 1. Deploy Python 3.12 to staging
-terraform apply
+# 1. Verify current state
+terraform state list | grep lambda
 
-# 2. Perform rollback
-terraform apply -var="python_runtime=python3.9"
+# 2. Practice rollback command (don't execute in prod)
+# Dry-run only:
+terraform plan -var="python_runtime=python3.9"
 
-# 3. Verify functionality restored
-make test
-# Run integration tests
+# 3. Prepare rollback script
+cat > rollback.sh <<'EOF'
+#!/bin/bash
+set -e
+echo "EMERGENCY ROLLBACK: Reverting to Python 3.9"
+terraform apply -auto-approve -var="python_runtime=python3.9"
+aws logs tail /aws/lambda/${FUNCTION_NAME} --since 5m
+EOF
 
-# 4. Re-deploy Python 3.12
-terraform apply -var="python_runtime=python3.12"
+chmod +x rollback.sh
+
+# 4. Document the exact command
+echo "terraform apply -auto-approve -var='python_runtime=python3.9'" > ROLLBACK_COMMAND.txt
+
+# 5. Have this command ready to copy-paste during deployment
 ```
+
+**Rollback Drill Checklist:**
+- [ ] Know exact rollback command
+- [ ] Have terminal ready with command
+- [ ] Know how to monitor CloudWatch
+- [ ] Know expected metrics/baselines
+- [ ] Have team communication channel open
+- [ ] Document decision criteria for rollback
 
 ---
 
@@ -655,13 +799,19 @@ ab -n 1000 -c 10 -A jet:fuel https://staging.example.com/test
 
 | Phase | Duration | Activities | Risk | Rollback |
 |-------|----------|------------|------|----------|
-| **1. Preparation** | Days 1-2 | Environment setup, backups | None | N/A |
-| **2. Development** | Days 3-5 | Local testing, code validation | Low | Instant |
-| **3. CI/CD** | Days 5-6 | GitHub Actions, automated tests | Low | Instant |
-| **4. Staging** | Days 7-10 | Deploy & validate, soak test | Medium | 5 min |
-| **5. Production** | Days 11-15 | Gradual rollout, monitoring | Medium | 5 min |
-| **6. Cleanup** | Days 16-17 | Documentation, communication | Low | N/A |
-| **Total** | **2-3 weeks** | **Full migration** | **Low** | **< 5 min** |
+| **1. Preparation** | Days 1-3 | Environment setup, backups, testing plan | None | N/A |
+| **2. Development** | Days 4-6 | Local testing, code validation | Low | Instant |
+| **3. CI/CD** | Days 6-7 | GitHub Actions, automated tests | Low | Instant |
+| **4. Blue/Green Prep** | Days 8-9 | Green Lambda deploy, smoke tests | Low | N/A |
+| **5. Production Deploy** | Days 10-14 | Traffic shift, intensive monitoring | **Medium-High** | < 5 min |
+| **6. Cleanup** | Days 15-16 | Remove green Lambda, documentation | Low | N/A |
+| **Total** | **2-2.5 weeks** | **Full migration (no staging)** | **Medium** | **< 5 min** |
+
+**Note:** Production deployment risk is higher without staging environment. Compensate with:
+- Extended monitoring periods
+- Off-hours deployment window
+- Quick rollback capability (< 5 minutes)
+- Team on-call during critical window
 
 ---
 
