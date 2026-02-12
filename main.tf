@@ -56,7 +56,7 @@ resource "aws_lambda_function" "lambda" {
   handler          = "edge_auth.handler"
   publish          = true
   role             = aws_iam_role.lambda.arn
-  runtime          = "python3.9"
+  runtime          = "python3.12"
   source_code_hash = data.archive_file.zip.output_base64sha256
 
   lifecycle {
